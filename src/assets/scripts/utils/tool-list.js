@@ -1,4 +1,5 @@
 export const tools = [
+    { name: "Password Manager", url: "chrome://password-manager/passwords" },
     { name: "Uppercase Converter", url: "tools/uppercase" },
     { name: "Lowercase Converter", url: "tools/lowercase" },
     { name: "Reverse Text", url: "tools/reverse" },

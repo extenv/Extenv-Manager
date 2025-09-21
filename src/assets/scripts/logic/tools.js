@@ -11,13 +11,19 @@ tools.forEach(tool => {
 
 export function ToolItems() {
     toolList.querySelectorAll("li").forEach(item => {
-        item.addEventListener("click", () => {
-            chrome.tabs.create({ url: chrome.runtime.getURL(item.dataset.url + ".html") });
-        });
+        if (!item.dataset.bound) {
+            item.addEventListener("click", () => {
+                const url = item.dataset.url;
+                if (url.startsWith("chrome://")) {
+                    chrome.tabs.create({ url });
+                } else {
+                    chrome.tabs.create({ url: chrome.runtime.getURL(url + ".html") });
+                }
+            });
+            item.dataset.bound = "true";
+        }
     });
 }
-
-document.addEventListener("DOMContentLoaded", ToolItems);
 
 searchInput.addEventListener("input", () => {
     const query = searchInput.value.toLowerCase();

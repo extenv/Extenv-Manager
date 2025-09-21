@@ -344,3 +344,36 @@ li.drag-over-top {
 li.drag-over-bottom {
   border-bottom: 2px solid dodgerblue;
 }
+
+#tree ul {
+  list-style: none;
+  margin: 0;
+  border-left: 1px solid #ccc;
+}
+
+#tree li {
+  position: relative;
+  margin: 4px 0;
+  padding-left: 16px;
+}
+
+#tree li::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  left: 0;
+  width: 12px;
+  height: 1px;
+  background: #ccc;
+}
+
+#tree .row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#tree .favicon {
+  width: 14px;
+  height: 14px;
+}
