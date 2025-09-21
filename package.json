@@ -1,0 +1,13 @@
+{
+  "name": "extenvmanager",
+  "module": "src/index.html",
+  "type": "module",
+  "description": "Manage your Bookmarks and Tools",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

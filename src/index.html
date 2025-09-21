@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="id">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Extenv Manager</title>
+    <link rel="stylesheet" href="./assets/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins&display=swap" rel="stylesheet">
+
+</head>
+
+<body>
+    <header>
+        <div>
+            📑 Extenv Manager
+        </div>
+        <div id="status">
+
+        </div>
+    </header>
+
+    <!-- === MENU TAB === -->
+    <nav>
+        <button class="tabBtn active" data-tab="bookmarks">Bookmarks</button>
+        <button class="tabBtn" data-tab="tools">Tools</button>
+        <button class="tabBtn" data-tab="settings">Settings</button>
+    </nav>
+
+    <!-- === BOOKMARKS TAB === -->
+    <section id="bookmarks" class="active">
+        <div id="tree">
+            <h2 class="tree-root">📂 Bookmarks</h2>
+            <ul id="bookmarkList">
+            </ul>
+        </div>
+    </section>
+
+    <!-- === CREDENTIALS TAB === -->
+    <section id="tools">
+        <div class="header-title">
+            <h2>🛠️ Tools</h2>
+        </div>
+
+        <div class="tools-search">
+            <input type="text" id="tool-search" placeholder="Search tools..." />
+        </div>
+        <ul id="tool-list"> </ul>
+    </section>
+
+    <!-- === SETTINGS TAB === -->
+    <section id="settings">
+        <div class="header-title">
+            <h2>⚙️ Settings</h2>
+        </div>
+
+
+        <!-- Appearance -->
+        <div class="settings-section">
+            <h3>Appearance</h3>
+            <label>
+                Font Size:
+                <div>
+                    <input type="number" id="fontSize" min="8" max="48" value="14">
+                    <span class="unit">px</span>
+                </div>
+            </label>
+
+            <label>
+                Font Family:
+                <select id="fontFamily">
+                    <option selected value="Poppins">Poppins</option>
+                    <option value="Arial">Arial</option>
+                    <option value="Verdana">Verdana</option>
+                    <option value="Tahoma">Tahoma</option>
+                    <option value="Times New Roman">Times New Roman</option>
+                </select>
+            </label>
+            <label>
+                Bookmarks Folder Color:
+                <input type="color" id="folderColor" value="#333333">
+            </label>
+            <label>
+                Bookmarks Link Color:
+                <input type="color" id="linkColor" value="#333333">
+            </label>
+
+        </div>
+
+        <!-- Export / Import -->
+        <div class="settings-section">
+            <h3>Export / Import Bookmarks</h3>
+
+            <label>
+                Format:
+                <select id="selectFormat">
+                    <option value="#" selected>Select format</option>
+                    <option value="json">JSON</option>
+                    <option value="html">Bookmarks HTML</option>
+                </select>
+            </label>
+            <div class="button-group">
+                <button id="exportBtn">Export</button>
+                <button id="importBtn">Import</button>
+            </div>
+            <input type="file" id="importFile" accept=".json" style="display:none">
+        </div>
+    </section>
+    <script type="module" src="./assets/scripts/index.js"></script>
+</body>
+
+</html>

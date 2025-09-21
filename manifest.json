@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Extenv Manager",
+  "version": "1.0.0",
+  "description": "Manage your Bookmarks and Tools",
+  "permissions": ["bookmarks", "storage", "contextMenus", "downloads"],
+  "background": {
+    "type": "module",
+    "service_worker": "src/assets/scripts/services/background.js"
+  },
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "Extenv Manager",
+    "default_popup": "src/index.html"
+  },
+  "icons": {
+    "16": "src/assets/images/icon.png",
+    "32": "src/assets/images/icon.png",
+    "48": "src/assets/images/icon.png",
+    "128": "src/assets/images/icon.png"
+  }
+}
