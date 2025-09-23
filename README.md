@@ -18,8 +18,9 @@ This project aims to offer a simple yet powerful experience for organizing bookm
 
 - 🛠 **Tools**
 
+  - Password Manger
+  - My Notes
   - Built-in utility features (work in progress).
-  - Quick access through the extension popup.
 
 - ⚙️ **Settings**
   - Customize preferences as needed.
