@@ -2,6 +2,7 @@ const notesList = document.getElementById("notesList");
 const contextMenu = document.getElementById("contextMenu");
 const mainHeader = document.querySelector(".MainHeader h3");
 const searchItem = document.getElementById("searchNotes");
+const exportNoteItem = document.getElementById("exportNote");
 
 let dragSource = null;
 let selectedItem = null;
@@ -32,7 +33,7 @@ function initializeEditor() {
                 [{ 'font': [] }],
                 [{ 'align': [] }],
                 ['clean'],
-                ['link', 'image', 'video']
+                ['link', 'image', 'video', 'table']
             ]
         },
         placeholder: 'Start writing your note...',
@@ -127,7 +128,6 @@ export function sideBar() {
     });
 }
 
-// New function to auto-expand folders containing active note
 function autoExpandFoldersWithActiveNote(items, folderStates, activeNoteId, parentFolderIds = []) {
     const updatedFolderStates = { ...folderStates };
 
@@ -157,7 +157,6 @@ function autoExpandFoldersWithActiveNote(items, folderStates, activeNoteId, pare
     return updatedFolderStates;
 }
 
-// Helper function to check if a folder contains a specific note
 function checkIfFolderContainsNote(folder, noteId) {
     if (!folder.children) return false;
 
@@ -191,7 +190,6 @@ function setupNoteClickHandlers() {
     });
 }
 
-// Add search functionality
 function setupSearch() {
     searchItem.addEventListener("input", debounce(handleSearch, 300));
     searchItem.addEventListener("keydown", (e) => {
@@ -313,7 +311,6 @@ function checkIfFolderContainsSearch(folder, searchTerm) {
     return false;
 }
 
-// Update the renderNotes function to highlight search matches
 function renderNotes(notes, folderStates, parentUl = notesList, level = 0, searchTerm = '') {
     parentUl.innerHTML = "";
     searchTerm = searchItem.value.trim().toLowerCase();
@@ -409,7 +406,6 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
-// ... rest of your existing functions remain the same ...
 
 function createNewNote(parentElement) {
     chrome.storage.local.get(["notes"], (result) => {
@@ -456,34 +452,6 @@ function renameItem(itemId, newName) {
     });
 }
 
-document.addEventListener('DOMContentLoaded', function () {
-    initializeEditor();
-    setupSearch();
-
-    chrome.storage.local.get(["notes", "activeNoteId"], (result) => {
-        const notes = result.notes || [];
-        currentNoteId = result.activeNoteId || null;
-
-        if (notes.length > 0) {
-            if (currentNoteId) {
-                const note = findItemById(notes, currentNoteId);
-                if (note) {
-                    loadNoteContent(currentNoteId);
-                } else {
-                    const firstNote = findFirstNote(notes);
-                    if (firstNote) {
-                        loadNoteContent(firstNote.id);
-                    }
-                }
-            } else {
-                const firstNote = findFirstNote(notes);
-                if (firstNote) {
-                    loadNoteContent(firstNote.id);
-                }
-            }
-        }
-    });
-});
 
 function findFirstNote(items) {
     for (const item of items) {
@@ -498,24 +466,6 @@ function findFirstNote(items) {
     return null;
 }
 
-const style = document.createElement('style');
-style.textContent = `
-    .note.active {
-        background-color: #e3f2fd;
-        border-radius: 4px;
-    }
-    
-    .note:hover {
-        background-color: #f5f5f5;
-        border-radius: 4px;
-    }
-    
-    .folder:hover {
-        background-color: #f5f5f5;
-        border-radius: 4px;
-    }
-`;
-document.head.appendChild(style);
 
 function setupFolderToggle() {
     notesList.addEventListener("click", (e) => {
@@ -559,6 +509,14 @@ function setupContextMenu() {
         if (isDeleting) return;
 
         const li = e.target.closest("li");
+
+        // Hide Export to PDF for folders, show for notes
+        if (li && li.dataset.type === "folder") {
+            exportNoteItem.style.display = "none";
+        } else {
+            exportNoteItem.style.display = "block";
+        }
+
         if (li) {
             selectedItem = li;
             contextMenu.style.display = "block";
@@ -575,6 +533,8 @@ function setupContextMenu() {
     document.addEventListener("click", (e) => {
         if (!contextMenu.contains(e.target)) {
             contextMenu.style.display = "none";
+            // Reset display when menu closes
+            document.getElementById("exportNote").style.display = "block";
         }
     });
 
@@ -585,6 +545,8 @@ function setupContextMenu() {
             handleContextMenuAction(action, selectedItem);
         }
         contextMenu.style.display = "none";
+        // Reset display after action
+        document.getElementById("exportNote").style.display = "block";
     });
 }
 
@@ -700,6 +662,9 @@ function startRename(itemElement) {
 
 function handleContextMenuAction(action, itemElement) {
     switch (action) {
+        case "exportNote":
+            exportQuillToPDF(itemElement, quill);
+            break;
         case "newFolder":
             createNewFolder(itemElement);
             break;
@@ -720,6 +685,907 @@ function handleContextMenuAction(action, itemElement) {
             break;
     }
 }
+async function exportQuillToPDF(itemElement, quill) {
+    if (!itemElement || !quill) return;
+    const noteId = itemElement.dataset.id;
+    const noteTitle = itemElement.querySelector('.item-text')?.textContent || 'Untitled';
+    showLoadingIndicator(true);
+
+    chrome.storage.local.get(["notes"], async (result) => {
+        const notes = result.notes || [];
+
+        // Use the recursive find function to search through nested structure
+        const note = findItemById(notes, noteId);
+
+        if (!note) {
+            console.error('Note not found. Looking for ID:', noteId, 'Available notes:', notes);
+            showLoadingIndicator(false);
+            alert('Note not found!');
+            return;
+        }
+
+        if (typeof window.jspdf === 'undefined') {
+            alert('PDF library not loaded.');
+            showLoadingIndicator(false);
+            return;
+        }
+
+        try {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+            const margin = 15;
+            const maxWidth = pageWidth - 2 * margin;
+            const footerHeight = 20;
+            let y = margin;
+            let page = 1;
+            let listLevel = 0;
+            let listCounters = {};
+
+            const addFooter = () => {
+                const exportDate = new Date().toLocaleString();
+                doc.setFontSize(8);
+                doc.setTextColor(128);
+                doc.text(`Exported on: ${exportDate}`, margin, pageHeight - 10);
+                doc.text(`Page ${page}`, pageWidth - margin - doc.getTextWidth(`Page ${page}`), pageHeight - 10);
+                doc.setTextColor(0);
+            };
+
+            addFooter();
+
+            // Function to extract text content from element including nested elements
+            const getElementText = (element) => {
+                if (element.nodeType === Node.TEXT_NODE) {
+                    return element.textContent || '';
+                }
+
+                let text = '';
+                for (const child of element.childNodes) {
+                    text += getElementText(child);
+                }
+                return text;
+            };
+
+            // Function to get element styling including inline styles
+            const getElementStyle = (element) => {
+                if (element.nodeType !== Node.ELEMENT_NODE) {
+                    return {
+                        fontSize: 12,
+                        fontWeight: 'normal',
+                        fontStyle: 'normal',
+                        color: '#000000',
+                        textDecoration: 'none',
+                        backgroundColor: 'transparent',
+                        marginLeft: 0,
+                        marginTop: 0,
+                        marginBottom: 0
+                    };
+                }
+
+                const style = window.getComputedStyle(element);
+
+                // Check for inline styles first (higher priority)
+                const inlineStyle = element.style;
+                const computedStyle = {
+                    fontSize: inlineStyle.fontSize || style.fontSize,
+                    fontWeight: inlineStyle.fontWeight || style.fontWeight,
+                    fontStyle: inlineStyle.fontStyle || style.fontStyle,
+                    color: inlineStyle.color || style.color,
+                    fontFamily: inlineStyle.fontFamily || style.fontFamily,
+                    backgroundColor: inlineStyle.backgroundColor || style.backgroundColor,
+                    textAlign: inlineStyle.textAlign || style.textAlign,
+                    textDecoration: inlineStyle.textDecoration || style.textDecoration,
+                    textDecorationLine: inlineStyle.textDecorationLine || style.textDecorationLine,
+                    marginLeft: inlineStyle.marginLeft || style.marginLeft,
+                    marginTop: inlineStyle.marginTop || style.marginTop,
+                    marginBottom: inlineStyle.marginBottom || style.marginBottom
+                };
+
+                return {
+                    fontSize: parseInt(computedStyle.fontSize) * 0.75 || 12,
+                    fontWeight: computedStyle.fontWeight,
+                    fontStyle: computedStyle.fontStyle,
+                    color: computedStyle.color,
+                    fontFamily: computedStyle.fontFamily,
+                    backgroundColor: computedStyle.backgroundColor,
+                    textAlign: computedStyle.textAlign,
+                    textDecoration: computedStyle.textDecoration || computedStyle.textDecorationLine,
+                    marginLeft: parseInt(computedStyle.marginLeft) || 0,
+                    marginTop: parseInt(computedStyle.marginTop) || 0,
+                    marginBottom: parseInt(computedStyle.marginBottom) || 0
+                };
+            };
+
+            // Function to apply styling to PDF document
+            const applyStyle = (doc, style) => {
+                let font = 'helvetica';
+                if (style.fontFamily) {
+                    if (style.fontFamily.includes('times') || style.fontFamily.includes('serif')) {
+                        font = 'times';
+                    } else if (style.fontFamily.includes('courier') || style.fontFamily.includes('monospace')) {
+                        font = 'courier';
+                    }
+                }
+
+                let fontStyle = 'normal';
+                if ((style.fontWeight === 'bold' || parseInt(style.fontWeight) >= 700) && style.fontStyle === 'italic') {
+                    fontStyle = 'bolditalic';
+                } else if (style.fontWeight === 'bold' || parseInt(style.fontWeight) >= 700) {
+                    fontStyle = 'bold';
+                } else if (style.fontStyle === 'italic') {
+                    fontStyle = 'italic';
+                }
+
+                doc.setFont(font, fontStyle);
+                doc.setFontSize(Math.max(8, Math.min(72, style.fontSize)));
+
+                // Set text color
+                const rgb = style.color.match(/\d+/g);
+                if (rgb && rgb.length >= 3) {
+                    doc.setTextColor(parseInt(rgb[0]), parseInt(rgb[1]), parseInt(rgb[2]));
+                }
+
+                return doc;
+            };
+
+            // Function to draw text with background color
+            const drawTextWithBackground = (doc, text, x, y, style) => {
+                const fontSize = doc.getFontSize();
+                const textWidth = doc.getTextWidth(text);
+                const textHeight = fontSize * 0.3528;
+
+                // Draw background if not transparent
+                if (style.backgroundColor && style.backgroundColor !== 'transparent' &&
+                    style.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+
+                    const bgRgb = style.backgroundColor.match(/\d+/g);
+                    if (bgRgb && bgRgb.length >= 3) {
+                        const alpha = bgRgb.length === 4 ? parseFloat(bgRgb[3]) : 1;
+                        if (alpha > 0) {
+                            doc.setFillColor(parseInt(bgRgb[0]), parseInt(bgRgb[1]), parseInt(bgRgb[2]));
+                            doc.rect(x, y - textHeight + 2, textWidth, textHeight + 1, 'F');
+                        }
+                    }
+                }
+
+                // Draw text
+                doc.text(text, x, y);
+
+                // Draw underline and strikethrough
+                if (style.textDecoration) {
+                    const underlineY = y + 1;
+                    const lineThroughY = y - textHeight / 2 + 1;
+
+                    if (style.textDecoration.includes('underline')) {
+                        doc.setDrawColor(0);
+                        doc.line(x, underlineY, x + textWidth, underlineY);
+                    }
+
+                    if (style.textDecoration.includes('line-through')) {
+                        doc.setDrawColor(0);
+                        doc.line(x, lineThroughY, x + textWidth, lineThroughY);
+                    }
+                }
+            };
+
+            // Function to process Quill.js specific formatting
+            const processQuillFormatting = (element, style) => {
+                // Handle Quill.js specific classes and data attributes
+                const classes = element.classList;
+                const dataAttributes = element.dataset;
+
+                // Check for Quill formatting classes
+                if (classes.contains('ql-font-serif')) {
+                    style.fontFamily = 'times, serif';
+                } else if (classes.contains('ql-font-monospace')) {
+                    style.fontFamily = 'courier, monospace';
+                }
+
+                // Check for Quill size classes
+                if (classes.contains('ql-size-small')) {
+                    style.fontSize = 10;
+                } else if (classes.contains('ql-size-large')) {
+                    style.fontSize = 18;
+                } else if (classes.contains('ql-size-huge')) {
+                    style.fontSize = 24;
+                }
+
+                // Check for Quill alignment classes
+                if (classes.contains('ql-align-center')) {
+                    style.textAlign = 'center';
+                } else if (classes.contains('ql-align-right')) {
+                    style.textAlign = 'right';
+                } else if (classes.contains('ql-align-justify')) {
+                    style.textAlign = 'justify';
+                }
+
+                // Check for Quill heading classes
+                if (classes.contains('ql-header-1')) {
+                    style.fontSize = 24;
+                    style.fontWeight = 'bold';
+                } else if (classes.contains('ql-header-2')) {
+                    style.fontSize = 20;
+                    style.fontWeight = 'bold';
+                } else if (classes.contains('ql-header-3')) {
+                    style.fontSize = 16;
+                    style.fontWeight = 'bold';
+                }
+
+                // Check for blockquote class
+                if (classes.contains('ql-blockquote')) {
+                    style.marginLeft = 20;
+                    style.fontStyle = 'italic';
+                    style.color = '#666';
+                }
+
+                // Check for code block class
+                if (classes.contains('ql-code-block')) {
+                    style.fontFamily = 'courier, monospace';
+                    style.backgroundColor = '#f5f5f5';
+                }
+
+                // Check for Quill formatting from data attributes and classes
+                if (dataAttributes.bold === 'true' || classes.contains('ql-bold')) {
+                    style.fontWeight = 'bold';
+                }
+                if (dataAttributes.italic === 'true' || classes.contains('ql-italic')) {
+                    style.fontStyle = 'italic';
+                }
+                if (dataAttributes.underline === 'true' || classes.contains('ql-underline')) {
+                    style.textDecoration = style.textDecoration ? style.textDecoration + ' underline' : 'underline';
+                }
+                if (dataAttributes.strike === 'true' || classes.contains('ql-strike')) {
+                    style.textDecoration = style.textDecoration ? style.textDecoration + ' line-through' : 'line-through';
+                }
+
+                // Check for background color classes
+                if (classes.contains('ql-background')) {
+                    const bgColor = element.style.backgroundColor;
+                    if (bgColor) {
+                        style.backgroundColor = bgColor;
+                    }
+                }
+
+                // Handle specific Quill format spans
+                if (element.tagName.toLowerCase() === 'span') {
+                    const styleAttr = element.getAttribute('style');
+                    if (styleAttr) {
+                        // Parse inline style for background color
+                        const bgMatch = styleAttr.match(/background-color:\s*([^;]+)/);
+                        if (bgMatch) {
+                            style.backgroundColor = bgMatch[1];
+                        }
+
+                        // Parse inline style for text decoration
+                        const underlineMatch = styleAttr.match(/text-decoration:\s*([^;]+)/);
+                        if (underlineMatch && underlineMatch[1].includes('underline')) {
+                            style.textDecoration = style.textDecoration ? style.textDecoration + ' underline' : 'underline';
+                        }
+                    }
+                }
+
+                return style;
+            };
+
+            // Function to get list bullet/number based on level and type
+            const getListMarker = (element, index) => {
+                const tag = element.tagName.toLowerCase();
+                const type = element.getAttribute('type');
+
+                if (tag === 'ol') {
+                    switch (type) {
+                        case 'a': return String.fromCharCode(97 + index) + '.';
+                        case 'A': return String.fromCharCode(65 + index) + '.';
+                        case 'i': return (index + 1) + '.';
+                        case 'I': return (index + 1) + '.';
+                        default: return (index + 1) + '.';
+                    }
+                } else if (tag === 'ul') {
+                    const style = element.getAttribute('style');
+                    if (style && style.includes('circle')) return '○';
+                    if (style && style.includes('square')) return '■';
+                    return '•';
+                }
+                return '•';
+            };
+
+            const processNode = async (node, parentStyle = null, listInfo = {}) => {
+                // Skip empty text nodes
+                if (node.nodeType === Node.TEXT_NODE) {
+                    const textContent = node.textContent || '';
+                    const trimmedText = textContent.trim();
+
+                    // Skip empty text nodes
+                    if (!trimmedText) return;
+
+                    // Use parent style for text nodes
+                    const currentStyle = parentStyle || getElementStyle(node.parentElement);
+                    const processedStyle = processQuillFormatting(node.parentElement, { ...currentStyle });
+                    applyStyle(doc, processedStyle);
+
+                    // Calculate indentation for lists
+                    let indent = margin;
+                    if (listInfo.level > 0) {
+                        indent = margin + (listInfo.level * 15);
+                    }
+
+                    const lines = doc.splitTextToSize(trimmedText, maxWidth - (indent - margin));
+                    for (const line of lines) {
+                        // Skip empty lines
+                        if (!line || line.trim() === '') continue;
+
+                        if (y + doc.getFontSize() * 0.3528 * 1.2 > pageHeight - margin - footerHeight) {
+                            doc.addPage();
+                            page++;
+                            y = margin;
+                            addFooter();
+                        }
+
+                        // Add list marker for first line of list item
+                        if (listInfo.isListItem && !listInfo.markerAdded) {
+                            const marker = getListMarker(listInfo.listElement, listInfo.index);
+                            const markerWidth = doc.getTextWidth(marker + ' ');
+                            doc.text(marker, indent - 10, y);
+                            listInfo.markerAdded = true;
+                        }
+
+                        // Ensure line is a valid string
+                        if (line && typeof line === 'string' && line.trim() !== '') {
+                            drawTextWithBackground(doc, line, indent, y, processedStyle);
+                            y += doc.getFontSize() * 0.3528 * 1.2;
+                        }
+                    }
+
+                    // Reset to default style after text
+                    if (parentStyle) {
+                        applyStyle(doc, {
+                            fontSize: 12,
+                            fontWeight: 'normal',
+                            fontStyle: 'normal',
+                            color: '#000000',
+                            textDecoration: 'none',
+                            backgroundColor: 'transparent'
+                        });
+                    }
+                }
+                else if (node.nodeType === Node.ELEMENT_NODE) {
+                    const tag = node.tagName.toLowerCase();
+
+                    if (tag === 'br') {
+                        y += doc.getFontSize() * 0.3528;
+                    }
+                    else if (tag === 'img') {
+                        try {
+                            const img = new Image();
+                            img.crossOrigin = 'Anonymous';
+                            img.src = node.src;
+
+                            await new Promise((resolve, reject) => {
+                                img.onload = () => {
+                                    try {
+                                        const w = Math.min(img.width, maxWidth);
+                                        const h = (img.height * w) / img.width;
+
+                                        if (y + h > pageHeight - margin - footerHeight) {
+                                            doc.addPage();
+                                            page++;
+                                            y = margin;
+                                            addFooter();
+                                        }
+
+                                        doc.addImage(img, 'JPEG', margin, y, w, h);
+                                        y += h + 5;
+                                        resolve();
+                                    } catch (error) {
+                                        resolve(); // Continue even if image fails
+                                    }
+                                };
+                                img.onerror = () => {
+                                    resolve(); // Continue even if image fails
+                                };
+
+                                // Set timeout for image loading
+                                setTimeout(() => {
+                                    resolve();
+                                }, 3000);
+                            });
+                        } catch (error) {
+                            console.warn('Error processing image:', error);
+                            // Continue processing other content
+                        }
+                    }
+                    else if (tag === 'table') {
+                        try {
+                            const rows = node.rows;
+                            const cellPadding = 2;
+                            const defaultRowHeight = 10;
+
+                            // Calculate column widths based on content
+                            const colWidths = [];
+                            const totalCols = Math.max(...Array.from(rows).map(row => row.cells.length));
+
+                            // Initialize equal widths
+                            for (let i = 0; i < totalCols; i++) {
+                                colWidths.push(maxWidth / totalCols);
+                            }
+
+                            for (let r = 0; r < rows.length; r++) {
+                                const cells = rows[r].cells;
+                                let maxCellHeight = defaultRowHeight;
+
+                                // First pass: calculate row height
+                                for (let c = 0; c < cells.length; c++) {
+                                    const cellText = getElementText(cells[c]).trim();
+                                    if (cellText) {
+                                        const cellStyle = getElementStyle(cells[c]);
+                                        const processedStyle = processQuillFormatting(cells[c], cellStyle);
+                                        applyStyle(doc, processedStyle);
+
+                                        const lines = doc.splitTextToSize(cellText, colWidths[c] - (2 * cellPadding));
+                                        const textHeight = lines.length * doc.getFontSize() * 0.3528 * 1.2;
+                                        maxCellHeight = Math.max(maxCellHeight, textHeight + (2 * cellPadding));
+                                    }
+                                }
+
+                                if (y + maxCellHeight > pageHeight - margin - footerHeight) {
+                                    doc.addPage();
+                                    page++;
+                                    y = margin;
+                                    addFooter();
+                                }
+
+                                let x = margin;
+                                for (let c = 0; c < cells.length; c++) {
+                                    const cellText = getElementText(cells[c]).trim();
+                                    const cellStyle = getElementStyle(cells[c]);
+                                    const processedStyle = processQuillFormatting(cells[c], cellStyle);
+
+                                    // Apply cell styling
+                                    applyStyle(doc, processedStyle);
+
+                                    // Draw cell border
+                                    doc.rect(x, y, colWidths[c], maxCellHeight);
+
+                                    // Add cell content with background and formatting
+                                    if (cellText) {
+                                        const lines = doc.splitTextToSize(cellText, colWidths[c] - (2 * cellPadding));
+                                        let textY = y + cellPadding + doc.getFontSize() * 0.3528;
+
+                                        for (const line of lines) {
+                                            if (line.trim() !== '') {
+                                                drawTextWithBackground(doc, line, x + cellPadding, textY, processedStyle);
+                                                textY += doc.getFontSize() * 0.3528 * 1.2;
+                                            }
+                                        }
+                                    }
+
+                                    x += colWidths[c];
+                                }
+                                y += maxCellHeight;
+                            }
+
+                            // Reset styling after table
+                            applyStyle(doc, {
+                                fontSize: 12,
+                                fontWeight: 'normal',
+                                fontStyle: 'normal',
+                                color: '#000000',
+                                textDecoration: 'none',
+                                backgroundColor: 'transparent'
+                            });
+
+                        } catch (error) {
+                            console.warn('Error processing table:', error);
+                            // Reset styling and continue
+                            applyStyle(doc, {
+                                fontSize: 12,
+                                fontWeight: 'normal',
+                                fontStyle: 'normal',
+                                color: '#000000',
+                                textDecoration: 'none',
+                                backgroundColor: 'transparent'
+                            });
+                        }
+                    }
+                    else if (tag === 'ol' || tag === 'ul') {
+                        // Process lists
+                        const listItems = node.querySelectorAll('li');
+                        const currentLevel = listLevel;
+                        listLevel++;
+
+                        if (!listCounters[currentLevel]) {
+                            listCounters[currentLevel] = 0;
+                        }
+
+                        for (let i = 0; i < listItems.length; i++) {
+                            listCounters[currentLevel]++;
+                            const listInfo = {
+                                level: currentLevel,
+                                index: i,
+                                listElement: node,
+                                isListItem: true,
+                                markerAdded: false
+                            };
+
+                            await processNode(listItems[i], parentStyle, listInfo);
+
+                            // Add extra space after list item
+                            y += doc.getFontSize() * 0.3528 * 0.5;
+                        }
+
+                        listLevel--;
+                        if (listLevel === 0) {
+                            listCounters = {};
+                        }
+                    }
+                    else if (tag === 'li') {
+                        // Process list item content
+                        for (const child of node.childNodes) {
+                            await processNode(child, parentStyle, listInfo);
+                        }
+                    }
+                    else if (tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4' || tag === 'h5' || tag === 'h6') {
+                        // Handle headings
+                        const level = parseInt(tag.charAt(1));
+                        const headingStyle = {
+                            fontSize: 28 - (level * 4),
+                            fontWeight: 'bold',
+                            fontStyle: 'normal',
+                            color: '#000000',
+                            textDecoration: 'none',
+                            backgroundColor: 'transparent',
+                            marginTop: 10,
+                            marginBottom: 5
+                        };
+
+                        applyStyle(doc, headingStyle);
+
+                        const text = getElementText(node).trim();
+                        if (text) {
+                            if (y + doc.getFontSize() * 0.3528 * 1.5 > pageHeight - margin - footerHeight) {
+                                doc.addPage();
+                                page++;
+                                y = margin;
+                                addFooter();
+                            }
+
+                            doc.text(text, margin, y);
+                            y += doc.getFontSize() * 0.3528 * 1.5;
+                        }
+
+                        // Reset style after heading
+                        applyStyle(doc, {
+                            fontSize: 12,
+                            fontWeight: 'normal',
+                            fontStyle: 'normal',
+                            color: '#000000',
+                            textDecoration: 'none',
+                            backgroundColor: 'transparent'
+                        });
+                    }
+                    else if (tag === 'blockquote') {
+                        // Handle blockquotes
+                        const quoteStyle = {
+                            fontSize: 12,
+                            fontWeight: 'normal',
+                            fontStyle: 'italic',
+                            color: '#666666',
+                            textDecoration: 'none',
+                            backgroundColor: '#f9f9f9',
+                            marginLeft: 20,
+                            marginTop: 5,
+                            marginBottom: 5
+                        };
+
+                        applyStyle(doc, quoteStyle);
+
+                        // Draw quote background
+                        doc.setFillColor(240, 240, 240);
+                        doc.rect(margin, y - 2, maxWidth, doc.getFontSize() * 0.3528 * 1.5 + 4, 'F');
+
+                        const text = getElementText(node).trim();
+                        if (text) {
+                            const lines = doc.splitTextToSize(text, maxWidth - 10);
+                            for (const line of lines) {
+                                if (y + doc.getFontSize() * 0.3528 * 1.2 > pageHeight - margin - footerHeight) {
+                                    doc.addPage();
+                                    page++;
+                                    y = margin;
+                                    addFooter();
+                                }
+
+                                doc.text(line, margin + 5, y);
+                                y += doc.getFontSize() * 0.3528 * 1.2;
+                            }
+                        }
+
+                        y += 5; // Extra space after quote
+
+                        // Reset style after quote
+                        applyStyle(doc, {
+                            fontSize: 12,
+                            fontWeight: 'normal',
+                            fontStyle: 'normal',
+                            color: '#000000',
+                            textDecoration: 'none',
+                            backgroundColor: 'transparent'
+                        });
+                    }
+                    else if (tag === 'pre' || tag === 'code') {
+                        // Handle code blocks
+                        const codeStyle = {
+                            fontSize: 10,
+                            fontWeight: 'normal',
+                            fontStyle: 'normal',
+                            color: '#333333',
+                            textDecoration: 'none',
+                            backgroundColor: '#f5f5f5',
+                            fontFamily: 'courier, monospace'
+                        };
+
+                        applyStyle(doc, codeStyle);
+
+                        // Draw code background
+                        doc.setFillColor(245, 245, 245);
+                        doc.rect(margin, y - 2, maxWidth, doc.getFontSize() * 0.3528 * 1.5 + 4, 'F');
+
+                        const text = getElementText(node).trim();
+                        if (text) {
+                            const lines = doc.splitTextToSize(text, maxWidth - 10);
+                            for (const line of lines) {
+                                if (y + doc.getFontSize() * 0.3528 * 1.2 > pageHeight - margin - footerHeight) {
+                                    doc.addPage();
+                                    page++;
+                                    y = margin;
+                                    addFooter();
+                                }
+
+                                doc.text(line, margin + 5, y);
+                                y += doc.getFontSize() * 0.3528 * 1.2;
+                            }
+                        }
+
+                        y += 5; // Extra space after code block
+
+                        // Reset style after code
+                        applyStyle(doc, {
+                            fontSize: 12,
+                            fontWeight: 'normal',
+                            fontStyle: 'normal',
+                            color: '#000000',
+                            textDecoration: 'none',
+                            backgroundColor: 'transparent'
+                        });
+                    }
+                    else if (tag === 'strong' || tag === 'b') {
+                        // Handle bold text specifically
+                        const style = getElementStyle(node);
+                        const processedStyle = { ...style, fontWeight: 'bold' };
+                        applyStyle(doc, processedStyle);
+
+                        for (const child of node.childNodes) {
+                            await processNode(child, processedStyle, listInfo);
+                        }
+                    }
+                    else if (tag === 'em' || tag === 'i') {
+                        // Handle italic text specifically
+                        const style = getElementStyle(node);
+                        const processedStyle = { ...style, fontStyle: 'italic' };
+                        applyStyle(doc, processedStyle);
+
+                        for (const child of node.childNodes) {
+                            await processNode(child, processedStyle, listInfo);
+                        }
+                    }
+                    else if (tag === 'u') {
+                        // Handle underline text specifically
+                        const style = getElementStyle(node);
+                        const processedStyle = {
+                            ...style,
+                            textDecoration: style.textDecoration ? style.textDecoration + ' underline' : 'underline'
+                        };
+                        applyStyle(doc, processedStyle);
+
+                        for (const child of node.childNodes) {
+                            await processNode(child, processedStyle, listInfo);
+                        }
+                    }
+                    else if (tag === 's' || tag === 'strike') {
+                        // Handle strikethrough text specifically
+                        const style = getElementStyle(node);
+                        const processedStyle = {
+                            ...style,
+                            textDecoration: style.textDecoration ? style.textDecoration + ' line-through' : 'line-through'
+                        };
+                        applyStyle(doc, processedStyle);
+
+                        for (const child of node.childNodes) {
+                            await processNode(child, processedStyle, listInfo);
+                        }
+                    }
+                    else if (tag === 'p' || tag === 'div') {
+                        // Handle paragraphs and divs with proper spacing
+                        const style = getElementStyle(node);
+                        const processedStyle = processQuillFormatting(node, style);
+
+                        // Add top margin
+                        if (processedStyle.marginTop > 0) {
+                            y += processedStyle.marginTop;
+                        }
+
+                        applyStyle(doc, processedStyle);
+
+                        // Process child nodes
+                        for (const child of node.childNodes) {
+                            await processNode(child, processedStyle, listInfo);
+                        }
+
+                        // Add bottom margin
+                        if (processedStyle.marginBottom > 0) {
+                            y += processedStyle.marginBottom;
+                        } else {
+                            y += doc.getFontSize() * 0.3528 * 0.5; // Default paragraph spacing
+                        }
+
+                        // Reset to default after processing children
+                        applyStyle(doc, {
+                            fontSize: 12,
+                            fontWeight: 'normal',
+                            fontStyle: 'normal',
+                            color: '#000000',
+                            textDecoration: 'none',
+                            backgroundColor: 'transparent'
+                        });
+                    }
+                    else {
+                        // Process other elements (span, etc.) with inline styles
+                        try {
+                            const style = getElementStyle(node);
+                            const processedStyle = processQuillFormatting(node, style);
+
+                            // Apply the style for this element
+                            applyStyle(doc, processedStyle);
+
+                            // Process child nodes with current style as parent style
+                            for (const child of node.childNodes) {
+                                await processNode(child, processedStyle, listInfo);
+                            }
+
+                            // Reset to default after processing children
+                            applyStyle(doc, {
+                                fontSize: 12,
+                                fontWeight: 'normal',
+                                fontStyle: 'normal',
+                                color: '#000000',
+                                textDecoration: 'none',
+                                backgroundColor: 'transparent'
+                            });
+
+                        } catch (error) {
+                            console.warn('Error processing element:', tag, error);
+                            // Reset to default and continue
+                            applyStyle(doc, {
+                                fontSize: 12,
+                                fontWeight: 'normal',
+                                fontStyle: 'normal',
+                                color: '#000000',
+                                textDecoration: 'none',
+                                backgroundColor: 'transparent'
+                            });
+                        }
+                    }
+                }
+            };
+
+            // Create temporary container and process content
+            const temp = document.createElement('div');
+            temp.innerHTML = note.content || '';
+
+            // Process each child node with error handling
+            for (const child of temp.childNodes) {
+                try {
+                    await processNode(child);
+                } catch (error) {
+                    console.warn('Error processing node:', error);
+                    // Continue with next node
+                }
+            }
+
+            // Save the PDF
+            const fileName = noteTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '_' + Date.now() + '.pdf';
+            doc.save(fileName);
+            showExportSuccess(noteTitle);
+
+        } catch (error) {
+            console.error('PDF generation error:', error);
+            alert('Error generating PDF: ' + error.message);
+        } finally {
+            showLoadingIndicator(false);
+        }
+    });
+}
+
+
+
+function showLoadingIndicator(show) {
+    let indicator = document.getElementById('pdfLoadingIndicator');
+
+    if (show) {
+        if (!indicator) {
+            indicator = document.createElement('div');
+            indicator.id = 'pdfLoadingIndicator';
+            indicator.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: rgba(0, 0, 0, 0.8);
+                color: white;
+                padding: 20px 30px;
+                border-radius: 8px;
+                z-index: 10000;
+                font-family: 'Poppins', sans-serif;
+                font-size: 14px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            `;
+            indicator.innerHTML = `
+                <div style="width: 20px; height: 20px; border: 2px solid #fff; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                Generating PDF...
+            `;
+            document.body.appendChild(indicator);
+        }
+        indicator.style.display = 'flex';
+    } else if (indicator) {
+        indicator.style.display = 'none';
+    }
+}
+
+function showExportSuccess(title) {
+    const existingToast = document.getElementById('pdfExportToast');
+    if (existingToast) {
+        document.body.removeChild(existingToast);
+    }
+
+    const toast = document.createElement('div');
+    toast.id = 'pdfExportToast';
+    toast.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: #4CAF50;
+        color: white;
+        padding: 12px 20px;
+        border-radius: 4px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        z-index: 10000;
+        font-family: 'Poppins', sans-serif;
+        animation: slideInRight 0.3s ease-out;
+        max-width: 300px;
+    `;
+
+    const truncatedTitle = title.length > 25 ? title.substring(0, 25) + '...' : title;
+    toast.innerHTML = `
+        <strong>PDF Exported Successfully!</strong><br>
+        <small>"${truncatedTitle}" has been downloaded.</small>
+    `;
+
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+        if (document.body.contains(toast)) {
+            toast.style.animation = 'slideOutRight 0.3s ease-in';
+            setTimeout(() => {
+                if (document.body.contains(toast)) {
+                    document.body.removeChild(toast);
+                }
+            }, 300);
+        }
+    }, 3000);
+}
+
 
 function removeFolderState(folderId) {
     chrome.storage.local.get(["folderStates"], (result) => {
@@ -1056,7 +1922,9 @@ function moveItemInStructure(notes, sourceId, targetId, position) {
 
 function findItemById(items, id) {
     for (const item of items) {
-        if (item.id === id) return item;
+        if (item.id === id) {
+            return item;
+        }
         if (item.children && item.children.length > 0) {
             const found = findItemById(item.children, id);
             if (found) return found;
@@ -1064,3 +1932,35 @@ function findItemById(items, id) {
     }
     return null;
 }
+
+
+
+
+document.addEventListener('DOMContentLoaded', function () {
+    initializeEditor();
+    setupSearch();
+
+    chrome.storage.local.get(["notes", "activeNoteId"], (result) => {
+        const notes = result.notes || [];
+        currentNoteId = result.activeNoteId || null;
+
+        if (notes.length > 0) {
+            if (currentNoteId) {
+                const note = findItemById(notes, currentNoteId);
+                if (note) {
+                    loadNoteContent(currentNoteId);
+                } else {
+                    const firstNote = findFirstNote(notes);
+                    if (firstNote) {
+                        loadNoteContent(firstNote.id);
+                    }
+                }
+            } else {
+                const firstNote = findFirstNote(notes);
+                if (firstNote) {
+                    loadNoteContent(firstNote.id);
+                }
+            }
+        }
+    });
+});
